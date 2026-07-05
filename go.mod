@@ -1,3 +1,3 @@
-module github.com/MsN-12/simple-cache
+module github.com/MsN-12/simplecache
 
 go 1.22

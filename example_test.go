@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	simplecache "github.com/MsN-12/simple-cache"
+	simplecache "github.com/MsN-12/simplecache"
 )
 
 func Example() {

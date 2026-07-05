@@ -1,21 +1,21 @@
-# simple-cache
+# simplecache
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/MsN-12/simple-cache.svg)](https://pkg.go.dev/github.com/MsN-12/simple-cache)
+[![Go Reference](https://pkg.go.dev/badge/github.com/MsN-12/simplecache.svg)](https://pkg.go.dev/github.com/MsN-12/simplecache)
 
-`simple-cache` is a small generic in-memory TTL cache for Go applications that do not need an external cache such as Redis.
+`simplecache` is a small generic in-memory TTL cache for Go applications that do not need an external cache such as Redis.
 
 The package is concurrency-safe and protects cached values from caller mutation by cloning values on both `Set` and `Get`.
 
 ## Install
 
 ```sh
-go get github.com/MsN-12/simple-cache
+go get github.com/MsN-12/simplecache
 ```
 
 Then import it in your application:
 
 ```go
-import simplecache "github.com/MsN-12/simple-cache"
+import simplecache "github.com/MsN-12/simplecache"
 ```
 
 ## Usage
@@ -27,7 +27,7 @@ import (
 	"fmt"
 	"time"
 
-	simplecache "github.com/MsN-12/simple-cache"
+	simplecache "github.com/MsN-12/simplecache"
 )
 
 func main() {
