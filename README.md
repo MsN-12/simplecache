@@ -151,6 +151,61 @@ copied := simplecache.DeepClone(user)
 
 ### Explicit Clone Functions
 
+Use a custom clone function when the type needs exact copy rules. This is the safest option for production code where a wrong clone could leak mutable state, duplicate a resource incorrectly, or break type invariants.
+
+You should write a custom cloner when your cached value contains:
+
+- interface fields whose concrete values may contain resources or mutable state
+- `sync.Mutex`, `sync.RWMutex`, `sync.Once`, or other synchronization primitives
+- channels, funcs, unsafe pointers, file handles, sockets, database connections, timers, contexts, or loggers
+- unexported mutable fields that reflection cannot safely copy
+- values with invariants that must be rebuilt instead of copied field-by-field
+- very large values where reflection cloning is too slow or allocates too much
+
+Worst-case example:
+
+```go
+type Notifier interface {
+	Notify(message string)
+}
+
+type EmailNotifier struct {
+	client *smtp.Client // resource, should not be cloned automatically
+	buffer []byte       // mutable state
+	mu     sync.Mutex   // synchronization primitive
+}
+
+type Phone struct {
+	Number string
+	Labels []string
+}
+
+type User struct {
+	Name     string
+	Age      int
+	Notifier Notifier // interface can hide complex concrete values
+	Phone    Phone
+}
+```
+
+For this kind of type, do not rely on `MustNewAuto`. Write the clone rules yourself:
+
+```go
+func CloneUser(user User) User {
+	user.Phone.Labels = simplecache.CloneSlice(user.Phone.Labels)
+
+	// Decide intentionally what to do with interface/resource fields.
+	// Here we keep the notifier shared because it owns external resources.
+	user.Notifier = user.Notifier
+
+	return user
+}
+
+cache := simplecache.MustNew[string, User](time.Minute, CloneUser)
+```
+
+Sometimes the safest clone is not a full deep copy. For resource fields, the correct behavior may be to share the resource, set it to nil, or rebuild it from configuration. That decision belongs in a custom cloner.
+
 Use `Identity` only for immutable values or values that are safe to share by copy:
 
 ```go
