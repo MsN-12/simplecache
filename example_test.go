@@ -30,3 +30,27 @@ func ExampleCloneSlice() {
 
 	// Output: [go cache]
 }
+
+func ExampleCache_GetOrSet() {
+	cache := simplecache.MustNew[string, string](time.Minute, simplecache.Identity[string])
+
+	value, cached, err := cache.GetOrSet("name", func() (string, error) {
+		return "mohsen", nil
+	})
+	if err != nil {
+		return
+	}
+
+	fmt.Println(value, cached)
+
+	// Output: mohsen false
+}
+
+func ExampleCache_SetWithTTL() {
+	cache := simplecache.MustNew[string, string](time.Minute, simplecache.Identity[string])
+
+	_ = cache.SetWithTTL("session", "abc", 5*time.Minute)
+	fmt.Println(cache.Has("session"))
+
+	// Output: true
+}

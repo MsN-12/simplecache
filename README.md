@@ -50,6 +50,25 @@ func main() {
 }
 ```
 
+Use `GetOrSet` when a value should be calculated only on cache miss:
+
+```go
+user, cached, err := cache.GetOrSet("user:1", func() (User, error) {
+	return fetchUserFromDatabase("1")
+})
+if err != nil {
+	return err
+}
+
+fmt.Println(user, cached)
+```
+
+Use `SetWithTTL` when one entry needs a different TTL from the cache default:
+
+```go
+err := cache.SetWithTTL("session:token", token, 10*time.Minute)
+```
+
 ## Clone Functions
 
 Go cannot automatically deep-copy every possible generic value safely. Values may contain slices, maps, pointers, interfaces, cycles, mutexes, file handles, channels, or other resources.
@@ -93,13 +112,41 @@ cache, err := simplecache.New[K, V](ttl, clone)
 cache := simplecache.MustNew[K, V](ttl, clone)
 
 cache.Set(key, value)
+err := cache.SetWithTTL(key, value, ttl)
 value, ok := cache.Get(key)
+value, cached, err := cache.GetOrSet(key, loadFunc)
+exists := cache.Has(key)
 cache.Delete(key)
 removed := cache.DeleteExpired()
+cache.Clear()
 n := cache.Len()
+fresh := cache.LenFresh()
 ```
 
 `Len` returns the number of stored entries, including expired entries that have not been accessed or removed by `DeleteExpired` yet.
+
+`LenFresh` removes expired entries and returns the number of unexpired entries.
+
+Expired entries are removed when accessed by `Get` or `Has`, or when `DeleteExpired` or `LenFresh` is called. There is no background cleanup goroutine.
+
+`GetOrSet` calls the load function outside the cache lock. If multiple goroutines request the same missing key at the same time, the load function may run more than once.
+
+## Production Notes
+
+This package is intentionally small:
+
+- Data is stored in process memory and is lost when the process exits.
+- The cache is not distributed and does not replace Redis when multiple processes need a shared cache.
+- There is no maximum size limit yet, so callers should avoid unbounded key growth.
+- Clone cost depends on the value size and the clone function used.
+
+## Benchmarks
+
+Run benchmarks with:
+
+```sh
+go test -bench=. -benchmem ./...
+```
 
 ## Requirements
 
