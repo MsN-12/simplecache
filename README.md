@@ -1,4 +1,4 @@
-# simple-cache
+# simplecache
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/MsN-12/simple-cache.svg)](https://pkg.go.dev/github.com/MsN-12/simple-cache)
 
