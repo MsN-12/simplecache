@@ -4,7 +4,7 @@
 
 `simplecache` is a small generic in-memory TTL cache for Go applications that do not need an external cache such as Redis.
 
-The package is concurrency-safe and protects cached values from caller mutation by cloning values on both `Set` and `Get`.
+The package is concurrency-safe and protects cached values from caller mutation by cloning values on both `Set` and `Get`. You can use automatic reflection-based cloning for convenience, or explicit clone functions for maximum control.
 
 ## Install
 
@@ -69,11 +69,87 @@ Use `SetWithTTL` when one entry needs a different TTL from the cache default:
 err := cache.SetWithTTL("session:token", token, 10*time.Minute)
 ```
 
-## Clone Functions
+Enable background cleanup only when you want expired entries removed periodically without waiting for access:
 
-Go cannot automatically deep-copy every possible generic value safely. Values may contain slices, maps, pointers, interfaces, cycles, mutexes, file handles, channels, or other resources.
+```go
+err := cache.StartCleanup(time.Minute)
+if err != nil {
+	return err
+}
+defer cache.StopCleanup()
+```
 
-For that reason, this package requires an explicit clone function when creating a cache.
+## Cloning Values
+
+The cache clones values when you call `Set` and `Get`. This prevents callers from mutating cached values through slices, maps, pointers, or nested mutable fields.
+
+There are two ways to configure cloning.
+
+### Automatic Cloning
+
+Use `NewAuto` or `MustNewAuto` for convenient reflection-based deep cloning:
+
+```go
+cache := simplecache.MustNewAuto[string, User](time.Minute)
+```
+
+`DeepClone` supports common Go values:
+
+- structs
+- arrays
+- slices
+- maps
+- pointers
+- interfaces
+- pointer, map, and slice cycles
+
+Example:
+
+```go
+type Notifier interface {
+	Notify(message string)
+}
+
+type EmailNotifier struct {
+	Sent []string
+}
+
+func (n *EmailNotifier) Notify(message string) {
+	n.Sent = append(n.Sent, message)
+}
+
+type Profile struct {
+	Bio  string
+	Tags []string
+}
+
+type User struct {
+	Name     string
+	Profile  Profile
+	Notifier Notifier
+}
+
+cache := simplecache.MustNewAuto[string, User](time.Minute)
+cache.Set("user:1", user)
+```
+
+Automatic cloning has important limitations:
+
+- funcs, channels, and unsafe pointers are copied as-is
+- unexported struct fields are shallow-copied
+- resource-owning values such as files, sockets, database connections, timers, and mutexes should not rely on automatic cloning
+- reflection is slower than a hand-written clone function
+- interface fields are cloned based on the concrete runtime value, but resource-like concrete values can still be unsafe
+
+Use automatic cloning for normal application data, DTOs, request/response structs, nested structs, slices, maps, and pointers. Use a custom clone function for critical production data or types with resources/invariants.
+
+You can also use `DeepClone` directly:
+
+```go
+copied := simplecache.DeepClone(user)
+```
+
+### Explicit Clone Functions
 
 Use `Identity` only for immutable values or values that are safe to share by copy:
 
@@ -93,23 +169,30 @@ Use a custom clone function for structs with nested mutable fields:
 
 ```go
 type User struct {
-	Name string
-	Tags []string
+	Name     string
+	Tags     []string
+	Metadata map[string][]int
 }
 
 func CloneUser(user User) User {
 	user.Tags = simplecache.CloneSlice(user.Tags)
+	user.Metadata = simplecache.DeepClone(user.Metadata)
 	return user
 }
 
 cache := simplecache.MustNew[string, User](time.Minute, CloneUser)
 ```
 
+Custom clone functions are the safest choice when your type owns resources, contains mutexes, has unexported mutable fields, has interface fields with complex concrete values, or needs special copy rules.
+
 ## API
 
 ```go
 cache, err := simplecache.New[K, V](ttl, clone)
 cache := simplecache.MustNew[K, V](ttl, clone)
+cache, err := simplecache.NewAuto[K, V](ttl)
+cache := simplecache.MustNewAuto[K, V](ttl)
+copied := simplecache.DeepClone(value)
 
 cache.Set(key, value)
 err := cache.SetWithTTL(key, value, ttl)
@@ -121,13 +204,15 @@ removed := cache.DeleteExpired()
 cache.Clear()
 n := cache.Len()
 fresh := cache.LenFresh()
+err := cache.StartCleanup(interval)
+cache.StopCleanup()
 ```
 
 `Len` returns the number of stored entries, including expired entries that have not been accessed or removed by `DeleteExpired` yet.
 
 `LenFresh` removes expired entries and returns the number of unexpired entries.
 
-Expired entries are removed when accessed by `Get` or `Has`, or when `DeleteExpired` or `LenFresh` is called. There is no background cleanup goroutine.
+Expired entries are removed when accessed by `Get` or `Has`, or when `DeleteExpired` or `LenFresh` is called. The cache does not start a background goroutine by default. Call `StartCleanup` to periodically remove expired entries in the background, and call `StopCleanup` before shutting down if cleanup was started.
 
 `GetOrSet` calls the load function outside the cache lock. If multiple goroutines request the same missing key at the same time, the load function may run more than once.
 

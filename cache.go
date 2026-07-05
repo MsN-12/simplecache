@@ -16,6 +16,13 @@ var (
 
 	// ErrNilLoadFunc is returned when GetOrSet is called without a load function.
 	ErrNilLoadFunc = errors.New("simplecache: load function must not be nil")
+
+	// ErrInvalidCleanupInterval is returned when background cleanup is started
+	// with a non-positive interval.
+	ErrInvalidCleanupInterval = errors.New("simplecache: cleanup interval must be greater than zero")
+
+	// ErrCleanupAlreadyRunning is returned when background cleanup is already running.
+	ErrCleanupAlreadyRunning = errors.New("simplecache: cleanup is already running")
 )
 
 // CloneFunc returns an independent copy of a cached value.
@@ -43,6 +50,10 @@ type Cache[K comparable, V any] struct {
 	ttl    time.Duration
 	clone  CloneFunc[V]
 	nextID uint64
+
+	cleanupMu   sync.Mutex
+	cleanupStop chan struct{}
+	cleanupDone chan struct{}
 }
 
 // New creates a cache whose entries expire after ttl.
@@ -62,9 +73,30 @@ func New[K comparable, V any](ttl time.Duration, clone CloneFunc[V]) (*Cache[K, 
 	}, nil
 }
 
+// NewAuto creates a cache whose entries expire after ttl and whose values are
+// copied with DeepClone.
+//
+// NewAuto is convenient for common nested values, but reflection-based cloning
+// cannot safely copy every Go value. For production-critical values,
+// resource-owning values, or values with invariants, prefer New with a custom
+// CloneFunc.
+func NewAuto[K comparable, V any](ttl time.Duration) (*Cache[K, V], error) {
+	return New[K, V](ttl, DeepClone[V])
+}
+
 // MustNew creates a cache and panics if the configuration is invalid.
 func MustNew[K comparable, V any](ttl time.Duration, clone CloneFunc[V]) *Cache[K, V] {
 	cache, err := New[K, V](ttl, clone)
+	if err != nil {
+		panic(err)
+	}
+
+	return cache
+}
+
+// MustNewAuto creates a cache with DeepClone and panics if ttl is invalid.
+func MustNewAuto[K comparable, V any](ttl time.Duration) *Cache[K, V] {
+	cache, err := NewAuto[K, V](ttl)
 	if err != nil {
 		panic(err)
 	}
@@ -224,4 +256,60 @@ func (c *Cache[K, V]) LenFresh() int {
 	defer c.mu.RUnlock()
 
 	return len(c.items)
+}
+
+// StartCleanup starts a background goroutine that periodically removes expired
+// entries. The cache does not start background cleanup automatically.
+func (c *Cache[K, V]) StartCleanup(interval time.Duration) error {
+	if interval <= 0 {
+		return ErrInvalidCleanupInterval
+	}
+
+	c.cleanupMu.Lock()
+	defer c.cleanupMu.Unlock()
+
+	if c.cleanupStop != nil {
+		return ErrCleanupAlreadyRunning
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	c.cleanupStop = stop
+	c.cleanupDone = done
+
+	go func() {
+		defer close(done)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				c.DeleteExpired()
+			case <-stop:
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
+// StopCleanup stops background cleanup if it is running.
+func (c *Cache[K, V]) StopCleanup() {
+	c.cleanupMu.Lock()
+	stop := c.cleanupStop
+	done := c.cleanupDone
+	if stop == nil {
+		c.cleanupMu.Unlock()
+		return
+	}
+
+	c.cleanupStop = nil
+	c.cleanupDone = nil
+	close(stop)
+	c.cleanupMu.Unlock()
+
+	<-done
 }

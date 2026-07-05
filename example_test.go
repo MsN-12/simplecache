@@ -7,6 +7,29 @@ import (
 	simplecache "github.com/MsN-12/simplecache"
 )
 
+type exampleNotifier interface {
+	Notify(string)
+}
+
+type exampleEmailNotifier struct {
+	Sent []string
+}
+
+func (n *exampleEmailNotifier) Notify(message string) {
+	n.Sent = append(n.Sent, message)
+}
+
+type exampleProfile struct {
+	Bio  string
+	Tags []string
+}
+
+type exampleUser struct {
+	Name     string
+	Profile  exampleProfile
+	Notifier exampleNotifier
+}
+
 func Example() {
 	cache := simplecache.MustNew[string, int](time.Minute, simplecache.Identity[int])
 
@@ -51,6 +74,39 @@ func ExampleCache_SetWithTTL() {
 
 	_ = cache.SetWithTTL("session", "abc", 5*time.Minute)
 	fmt.Println(cache.Has("session"))
+
+	// Output: true
+}
+
+func ExampleMustNewAuto() {
+	cache := simplecache.MustNewAuto[string, exampleUser](time.Minute)
+
+	user := exampleUser{
+		Name:     "Alice",
+		Profile:  exampleProfile{Bio: "Software Engineer", Tags: []string{"go", "cache"}},
+		Notifier: &exampleEmailNotifier{Sent: []string{"created"}},
+	}
+	cache.Set("user", user)
+
+	user.Profile.Tags[0] = "changed"
+	user.Notifier.(*exampleEmailNotifier).Sent[0] = "changed"
+
+	cached, _ := cache.Get("user")
+	fmt.Println(cached.Name, cached.Profile.Tags, cached.Notifier.(*exampleEmailNotifier).Sent)
+
+	// Output: Alice [go cache] [created]
+}
+
+func ExampleCache_StartCleanup() {
+	cache := simplecache.MustNewAuto[string, string](time.Minute)
+
+	if err := cache.StartCleanup(time.Minute); err != nil {
+		return
+	}
+	defer cache.StopCleanup()
+
+	cache.Set("key", "value")
+	fmt.Println(cache.Has("key"))
 
 	// Output: true
 }

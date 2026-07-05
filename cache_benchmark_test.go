@@ -131,3 +131,52 @@ func BenchmarkConcurrentGetSet(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkDeepCloneNestedStruct(b *testing.B) {
+	value := testUser{
+		ID:    "u-123",
+		Name:  "Alice",
+		Email: "alice@example.com",
+		Profile: testProfile{
+			Bio:     "Software Engineer",
+			Age:     30,
+			Address: testAddress{Street: "123 Main St", City: "Berlin", Country: "Germany"},
+			Tags:    []string{"go", "cache"},
+			Counters: map[string][]int{
+				"login": []int{1, 2},
+			},
+		},
+		Notifier: &testEmailNotifier{Sent: []string{"created"}},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = DeepClone(value)
+	}
+}
+
+func BenchmarkSetAutoNestedStruct(b *testing.B) {
+	cache := MustNewAuto[int, testUser](time.Minute)
+	value := testUser{
+		ID:    "u-123",
+		Name:  "Alice",
+		Email: "alice@example.com",
+		Profile: testProfile{
+			Bio:     "Software Engineer",
+			Age:     30,
+			Address: testAddress{Street: "123 Main St", City: "Berlin", Country: "Germany"},
+			Tags:    []string{"go", "cache"},
+			Counters: map[string][]int{
+				"login": []int{1, 2},
+			},
+		},
+		Notifier: &testEmailNotifier{Sent: []string{"created"}},
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cache.Set(i, value)
+	}
+}

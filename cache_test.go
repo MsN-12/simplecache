@@ -184,6 +184,60 @@ func TestLenFresh(t *testing.T) {
 	}
 }
 
+func TestStartCleanupRejectsInvalidInterval(t *testing.T) {
+	cache := MustNew[string, int](time.Minute, Identity[int])
+
+	err := cache.StartCleanup(0)
+	if !errors.Is(err, ErrInvalidCleanupInterval) {
+		t.Fatalf("expected ErrInvalidCleanupInterval, got %v", err)
+	}
+}
+
+func TestStartCleanupRejectsAlreadyRunningCleanup(t *testing.T) {
+	cache := MustNew[string, int](time.Minute, Identity[int])
+
+	if err := cache.StartCleanup(time.Millisecond); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	defer cache.StopCleanup()
+
+	err := cache.StartCleanup(time.Millisecond)
+	if !errors.Is(err, ErrCleanupAlreadyRunning) {
+		t.Fatalf("expected ErrCleanupAlreadyRunning, got %v", err)
+	}
+}
+
+func TestStartCleanupRemovesExpiredEntries(t *testing.T) {
+	cache := MustNew[string, int](time.Minute, Identity[int])
+
+	cache.Set("expired", 1)
+	expireKey(t, cache, "expired")
+
+	if err := cache.StartCleanup(time.Millisecond); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	defer cache.StopCleanup()
+
+	waitUntil(t, func() bool {
+		return cache.Len() == 0
+	})
+}
+
+func TestStopCleanupIsIdempotentAndCanRestart(t *testing.T) {
+	cache := MustNew[string, int](time.Minute, Identity[int])
+
+	cache.StopCleanup()
+	if err := cache.StartCleanup(time.Millisecond); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	cache.StopCleanup()
+
+	if err := cache.StartCleanup(time.Millisecond); err != nil {
+		t.Fatalf("expected cleanup to restart, got %v", err)
+	}
+	cache.StopCleanup()
+}
+
 func expireKey[K comparable, V any](t *testing.T, cache *Cache[K, V], key K) {
 	t.Helper()
 
@@ -197,6 +251,20 @@ func expireKey[K comparable, V any](t *testing.T, cache *Cache[K, V], key K) {
 
 	item.expiresAt = time.Now().Add(-time.Second)
 	cache.items[key] = item
+}
+
+func waitUntil(t *testing.T, condition func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	t.Fatal("condition was not met before deadline")
 }
 
 func TestSetClonesSlice(t *testing.T) {
